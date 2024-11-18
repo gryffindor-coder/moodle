@@ -200,7 +200,7 @@ class api {
      * @param string|null $selecteddefaulprovider
      * @return array
      */
-    public static function get_enabled_providers_and_default(string $selecteddefaulprovider = null): array {
+    public static function get_enabled_providers_and_default(?string $selecteddefaulprovider = null): array {
         $communicationproviders = self::get_communication_plugin_list_for_form();
         $defaulprovider = processor::PROVIDER_NONE;
         if (!empty($selecteddefaulprovider) && array_key_exists($selecteddefaulprovider, $communicationproviders)) {
@@ -265,13 +265,13 @@ class api {
         $mform->insertElementBefore(
             $mform->createElement(
                 'text',
-                'communicationroomname',
+                $provider . 'roomname',
                 get_string('communicationroomname', 'communication'),
                 'maxlength="100" size="20"'
             ),
             'addcommunicationoptionshere'
         );
-        $mform->setType('communicationroomname', PARAM_TEXT);
+        $mform->setType($provider . 'roomname', PARAM_TEXT);
 
         $mform->insertElementBefore(
             $mform->createElement(
@@ -376,6 +376,9 @@ class api {
      * @return string
      */
     public function get_room_name(): string {
+        if (!$this->communication) {
+            return '';
+        }
         return $this->communication->get_room_name();
     }
 
@@ -387,7 +390,8 @@ class api {
     public function set_data(\stdClass $instance): void {
         if (!empty($instance->id) && $this->communication) {
             $instance->selectedcommunication = $this->communication->get_provider();
-            $instance->communicationroomname = $this->communication->get_room_name();
+            $roomnameidentifier = $this->get_provider() . 'roomname';
+            $instance->$roomnameidentifier = $this->communication->get_room_name();
 
             $this->communication->get_form_provider()->set_form_data($instance);
         }
@@ -427,6 +431,7 @@ class api {
      * @param string $communicationroomname The communication room name
      * @param array $users The user ids to add to the room
      * @param null|\stored_file $instanceimage The stored file for the avatar
+     * @param bool $queue Queue the task for the provider room or not
      */
     public function configure_room_and_membership_by_provider(
         string $provider,
@@ -434,6 +439,7 @@ class api {
         string $communicationroomname,
         array $users,
         ?\stored_file $instanceimage = null,
+        bool $queue = true,
     ): void {
         // If the current provider is inactive and the new provider is also none, then nothing to do.
         if (
@@ -456,6 +462,7 @@ class api {
                 communicationroomname: $communicationroomname,
                 avatar: $instanceimage,
                 instance: $instance,
+                queue: $queue,
             );
             return;
         }
@@ -471,9 +478,8 @@ class api {
             // Now deactivate the previous provider.
             $this->update_room(
                 active: processor::PROVIDER_INACTIVE,
-                communicationroomname: $communicationroomname,
-                avatar: $instanceimage,
                 instance: $instance,
+                queue: $queue,
             );
         }
 
@@ -492,8 +498,9 @@ class api {
                 communicationroomname: $communicationroomname,
                 avatar: $instanceimage,
                 instance: $instance,
+                queue: $queue,
             );
-            $queue = false;
+            $queueusertask = false;
         } else {
             // Otherwise update the room.
             $this->update_room(
@@ -501,14 +508,15 @@ class api {
                 communicationroomname: $communicationroomname,
                 avatar: $instanceimage,
                 instance: $instance,
+                queue: $queue,
             );
-            $queue = true;
+            $queueusertask = true;
         }
 
         // Now add the members.
         $this->add_members_to_room(
             userids: $users,
-            queue: $queue,
+            queue: $queueusertask,
         );
 
     }

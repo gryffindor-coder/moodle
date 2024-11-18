@@ -159,11 +159,11 @@ class users extends system_report {
                 ->add_callback(static function(string $fullname, \stdClass $row): string {
                     if ($row->suspended) {
                         $fullname .= ' ' . \html_writer::tag('span', get_string('suspended', 'moodle'),
-                            ['class' => 'badge badge-secondary ml-1']);
+                            ['class' => 'badge badge-secondary ms-1']);
                     }
                     if (!$row->confirmed) {
                         $fullname .= ' ' . \html_writer::tag('span', get_string('confirmationpending', 'admin'),
-                            ['class' => 'badge badge-danger ml-1']);
+                            ['class' => 'badge badge-danger ms-1']);
                     }
                     return $fullname;
                 });
@@ -184,6 +184,7 @@ class users extends system_report {
         $entityuseralias = $entityuser->get_table_alias('user');
 
         $filters = [
+            'user:fullname',
             'user:firstname',
             'user:lastname',
             'user:username',

@@ -226,7 +226,7 @@ class behat_util extends testing_util {
 
             behat_error (BEHAT_EXITCODE_REQUIREMENT, $CFG->behat_wwwroot . ' is not available, ensure you specified ' .
                 'correct url and that the server is set up and started.' . PHP_EOL . ' More info in ' .
-                behat_command::DOCS_URL . PHP_EOL);
+                behat_command::DOCS_URL . PHP_EOL . parent::get_site_info());
         }
 
         // Check if cli version is same as web version.
@@ -519,11 +519,13 @@ class behat_util extends testing_util {
 
         $accessibility = empty(behat_config_manager::get_behat_run_config_value('axe')) ? 'No' : 'Yes';
         $scssdeprecations = empty(behat_config_manager::get_behat_run_config_value('scss-deprecations')) ? 'No' : 'Yes';
+        $icondeprecations = empty(behat_config_manager::get_behat_run_config_value('no-icon-deprecations')) ? 'Yes' : 'No';
 
         $siteinfo .= <<<EOF
 Run optional tests:
 - Accessibility: {$accessibility}
 - SCSS deprecations: {$scssdeprecations}
+- Icon deprecations: {$icondeprecations}
 
 EOF;
 

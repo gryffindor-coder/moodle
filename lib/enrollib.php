@@ -849,7 +849,7 @@ function enrol_get_my_courses($fields = null, $sort = null, $limit = 0, $coursei
  * @param array $instances enrol instances of this course, improves performance
  * @return array of pix_icon
  */
-function enrol_get_course_info_icons($course, array $instances = NULL) {
+function enrol_get_course_info_icons($course, ?array $instances = NULL) {
     $icons = array();
     if (is_null($instances)) {
         $instances = enrol_get_instances($course->id, true);
@@ -2159,6 +2159,7 @@ abstract class enrol_plugin {
         $hook = new \core_enrol\hook\after_user_enrolled(
             enrolinstance: $instance,
             userenrolmentinstance: $ue,
+            roleid: $roleid,
         );
         \core\di::get(\core\hook\manager::class)->dispatch($hook);
 
@@ -2237,7 +2238,7 @@ abstract class enrol_plugin {
         }
 
         // Dispatch the hook for pre user enrolment update actions.
-        $hook = new \core_enrol\hook\before_user_enrolment_update(
+        $hook = new \core_enrol\hook\before_user_enrolment_updated(
             enrolinstance: $instance,
             userenrolmentinstance: $ue,
             statusmodified: $statusmodified,
@@ -2297,7 +2298,7 @@ abstract class enrol_plugin {
         }
 
         // Dispatch the hook for pre user unenrolment actions.
-        $hook = new \core_enrol\hook\before_user_enrolment_remove(
+        $hook = new \core_enrol\hook\before_user_enrolment_removed(
             enrolinstance: $instance,
             userenrolmentinstance: $ue,
         );
@@ -2594,7 +2595,7 @@ abstract class enrol_plugin {
      * @param array instance fields
      * @return int id of new instance, null if can not be created
      */
-    public function add_instance($course, array $fields = NULL) {
+    public function add_instance($course, ?array $fields = NULL) {
         global $DB;
 
         if ($course->id == SITEID) {
@@ -2762,7 +2763,7 @@ abstract class enrol_plugin {
         }
 
         // Dispatch the hook for pre enrol instance delete actions.
-        $hook = new \core_enrol\hook\before_enrol_instance_delete(
+        $hook = new \core_enrol\hook\before_enrol_instance_deleted(
             enrolinstance: $instance,
         );
         \core\di::get(\core\hook\manager::class)->dispatch($hook);
@@ -3536,7 +3537,12 @@ abstract class enrol_plugin {
             $errors['errorunsupportedmethod'] =
                 new lang_string('errorunsupportedmethod', 'tool_uploadcourse',
                     get_class($this));
-
+        } else {
+            $plugin = $this->get_name();
+            if (!enrol_is_enabled($plugin)) {
+                $pluginname = get_string('pluginname', 'enrol_' . $plugin);
+                $errors['plugindisabled'] = new lang_string('plugindisabled', 'enrol', $pluginname);
+            }
         }
         return $errors;
     }
@@ -3639,25 +3645,26 @@ abstract class enrol_plugin {
      * @param int $userid User ID.
      * @param int $sendoption Send email from constant ENROL_SEND_EMAIL_FROM_*
      * @param null|string $message Message to send to the user.
+     * @param int|null $roleid The assigned role ID
      */
     public function send_course_welcome_message_to_user(
         stdClass $instance,
         int $userid,
         int $sendoption,
         ?string $message = '',
+        ?int $roleid = null,
     ): void {
         global $DB;
         $context = context_course::instance($instance->courseid);
         $user = core_user::get_user($userid);
         $course = get_course($instance->courseid);
-        $courserole = $DB->get_field(
-            table: 'role',
-            return: 'shortname',
-            conditions: ['id' => $instance->roleid],
-        );
+
+        // Fallback to the instance role ID if parameter not specified.
+        $courseroleid = $roleid ?: $instance->roleid;
+        $courserole = $DB->get_record('role', ['id' => $courseroleid]);
 
         $a = new stdClass();
-        $a->coursename = format_string($course->fullname, true, ['context' => $context]);
+        $a->coursename = format_string($course->fullname, true, ['context' => $context, 'escape' => false]);
         $a->profileurl = (new moodle_url(
             url: '/user/view.php',
             params: [
@@ -3665,7 +3672,11 @@ abstract class enrol_plugin {
                 'course' => $instance->courseid,
             ],
         ))->out();
-        $a->fullname = fullname($user);
+
+        $placeholders = \core_user::get_name_placeholders($user);
+        foreach ($placeholders as $field => $value) {
+            $a->{$field} = $value;
+        }
 
         if ($message && trim($message) !== '') {
             $placeholders = [
@@ -3684,7 +3695,7 @@ abstract class enrol_plugin {
                 $user->email,
                 $user->firstname,
                 $user->lastname,
-                $courserole,
+                role_get_name($courserole, $context),
             ];
             $message = str_replace($placeholders, $values, $message);
             if (strpos($message, '<') === false) {
@@ -3702,7 +3713,6 @@ abstract class enrol_plugin {
             $messagehtml = text_to_html($messagetext, null, false, true);
         }
 
-        $subject = get_string('welcometocourse', 'moodle', format_string($course->fullname, true, ['context' => $context]));
         $contact = $this->get_welcome_message_contact(
             sendoption: $sendoption,
             context: $context,
@@ -3718,7 +3728,7 @@ abstract class enrol_plugin {
         $message->name = 'enrolcoursewelcomemessage';
         $message->userfrom = $contact;
         $message->userto = $user;
-        $message->subject = $subject;
+        $message->subject = get_string('welcometocourse', 'moodle', $a->coursename);
         $message->fullmessage = $messagetext;
         $message->fullmessageformat = FORMAT_MARKDOWN;
         $message->fullmessagehtml = $messagehtml;
@@ -3727,5 +3737,57 @@ abstract class enrol_plugin {
         $message->contexturlname = $course->fullname;
 
         message_send($message);
+    }
+
+    /**
+     * Updates enrol plugin instance with provided data.
+     * @param int $courseid Course ID.
+     * @param array $enrolmentdata enrolment data.
+     * @param stdClass $instance Instance to update.
+     *
+     * @return stdClass updated instance
+     */
+    public function update_enrol_plugin_data(int $courseid, array $enrolmentdata, stdClass $instance): stdClass {
+        global $DB;
+
+        // Sort out the start, end and date.
+        $instance->enrolstartdate = (isset($enrolmentdata['startdate']) ? strtotime($enrolmentdata['startdate']) : 0);
+        $instance->enrolenddate = (isset($enrolmentdata['enddate']) ? strtotime($enrolmentdata['enddate']) : 0);
+
+        // Is the enrolment period set?
+        if (!empty($enrolmentdata['enrolperiod'])) {
+            if (preg_match('/^\d+$/', $enrolmentdata['enrolperiod'])) {
+                $enrolmentdata['enrolperiod'] = (int)$enrolmentdata['enrolperiod'];
+            } else {
+                // Try and convert period to seconds.
+                $enrolmentdata['enrolperiod'] = strtotime('1970-01-01 GMT + ' . $enrolmentdata['enrolperiod']);
+            }
+            $instance->enrolperiod = $enrolmentdata['enrolperiod'];
+        }
+        if ($instance->enrolstartdate > 0 && isset($enrolmentdata['enrolperiod'])) {
+            $instance->enrolenddate = $instance->enrolstartdate + $enrolmentdata['enrolperiod'];
+        }
+        if ($instance->enrolenddate > 0) {
+            $instance->enrolperiod = $instance->enrolenddate - $instance->enrolstartdate;
+        }
+        if ($instance->enrolenddate < $instance->enrolstartdate) {
+            $instance->enrolenddate = $instance->enrolstartdate;
+        }
+
+        // Sort out the given role.
+        if (isset($enrolmentdata['role']) || isset($enrolmentdata['roleid'])) {
+            if (isset($enrolmentdata['role'])) {
+                $roleid = $DB->get_field('role', 'id', ['shortname' => $enrolmentdata['role']], MUST_EXIST);
+            } else {
+                $roleid = $enrolmentdata['roleid'];
+            }
+            $instance->roleid = $roleid;
+        }
+
+        // Sort out custom instance name.
+        if (isset($enrolmentdata['name'])) {
+            $instance->name = $enrolmentdata['name'];
+        }
+        return $instance;
     }
 }

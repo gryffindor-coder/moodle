@@ -324,13 +324,14 @@ class helper {
      * Get the enrolled users for course.
      *
      * @param stdClass $course The course object.
+     * @param bool $onlyactive Only enrolments that are active (e.g. not suspended).
      * @return array
      */
-    public static function get_enrolled_users_for_course(stdClass $course): array {
+    public static function get_enrolled_users_for_course(stdClass $course, bool $onlyactive = true): array {
         global $CFG;
         require_once($CFG->libdir . '/enrollib.php');
         return array_column(
-            enrol_get_course_users(courseid: $course->id),
+            enrol_get_course_users(courseid: $course->id, onlyactive: $onlyactive),
             'id',
         );
     }
@@ -430,10 +431,14 @@ class helper {
         if (empty($provider)) {
             $provider = $coursecommunication->get_provider();
         }
+        $roomnameidentifier = $provider . 'roomname';
 
         // Determine the communication room name if none was provided and add it to the course data.
-        if (empty($course->communicationroomname)) {
-            $course->communicationroomname = $course->fullname ?? get_course($course->id)->fullname;
+        if (empty($course->$roomnameidentifier)) {
+            $course->$roomnameidentifier = $coursecommunication->get_room_name();
+            if (empty($course->$roomnameidentifier)) {
+                $course->$roomnameidentifier = $course->fullname ?? get_course($course->id)->fullname;
+            }
         }
 
         // List of enrolled users for course communication.
@@ -465,7 +470,7 @@ class helper {
             $communication->configure_room_and_membership_by_provider(
                 provider: $provider,
                 instance: $course,
-                communicationroomname: $course->communicationroomname,
+                communicationroomname: $course->$roomnameidentifier,
                 users: $enrolledusers,
                 instanceimage: $courseimage,
             );
@@ -480,30 +485,21 @@ class helper {
             $communication = self::load_by_course(
                 courseid: $course->id,
                 context: $coursecontext,
-                provider: $provider === processor::PROVIDER_NONE ? null : $provider,
             );
 
-            if ($communication->get_processor() === null) {
-                // If a course communication instance is not created, create one.
-                $communication->create_and_configure_room(
-                    communicationroomname: $course->communicationroomname,
-                    avatar: $courseimage,
-                    instance: $course,
-                    queue: false,
-                );
-            } else {
-                $communication->remove_all_members_from_room();
-                // Now update the course communication instance with the latest changes.
-                // We are not making room for this instance as it is a group mode enabled course.
-                // If provider is none, then we will make the room inactive, otherwise always active in group mode.
-                $communication->update_room(
-                    active: $provider === processor::PROVIDER_NONE ? processor::PROVIDER_INACTIVE : processor::PROVIDER_ACTIVE,
-                    communicationroomname: $course->communicationroomname,
-                    avatar: $courseimage,
-                    instance: $course,
-                    queue: false,
-                );
-            }
+            // Now handle the course communication according to the provider.
+            $communication->configure_room_and_membership_by_provider(
+                provider: $provider,
+                instance: $course,
+                communicationroomname: $course->$roomnameidentifier,
+                users: $enrolledusers,
+                instanceimage: $courseimage,
+                queue: false,
+            );
+
+            // As the course is in group mode, make sure no users are in the course room.
+            $communication->reload();
+            $communication->remove_all_members_from_room();
         }
     }
 
@@ -525,10 +521,14 @@ class helper {
         );
 
         foreach ($coursegroups as $coursegroup) {
-            $groupuserstoadd = array_column(
+            $groupusers = array_column(
                 groups_get_members(groupid: $coursegroup->id),
                 'id',
             );
+
+            // Filter out users who are not active in this course.
+            $enrolledusers = self::get_enrolled_users_for_course(course: $course);
+            $groupuserstoadd = array_intersect($groupusers, $enrolledusers);
 
             foreach ($allaccessgroupusers as $allaccessgroupuser) {
                 if (!in_array($allaccessgroupuser, $groupuserstoadd, true)) {
@@ -542,8 +542,9 @@ class helper {
                 context: $coursecontext,
             );
 
+            $roomnameidentifier = $provider . 'roomname';
             $communicationroomname = self::format_group_room_name(
-                baseroomname: $course->communicationroomname,
+                baseroomname: $course->$roomnameidentifier,
                 groupname: $coursegroup->name,
             );
 

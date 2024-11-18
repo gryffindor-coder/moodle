@@ -37,6 +37,7 @@ class backup_stepslib_test extends \advanced_testcase {
         require_once($CFG->dirroot . '/backup/util/includes/backup_includes.php');
         require_once($CFG->dirroot . '/backup/util/includes/restore_includes.php');
         require_once($CFG->dirroot . '/backup/moodle2/backup_stepslib.php');
+        parent::setUpBeforeClass();
     }
 
     /**
@@ -71,11 +72,11 @@ class backup_stepslib_test extends \advanced_testcase {
                 break;
             }
         }
-        $bc->destroy();
 
         $reflection = new \ReflectionClass($step);
         $method = $reflection->getMethod('define_structure');
         $structure = $method->invoke($step);
+        $bc->destroy();
 
         $elements = $structure->get_final_elements();
         $this->assertArrayHasKey('number', $elements);

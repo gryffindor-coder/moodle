@@ -17,6 +17,7 @@
 namespace qtype_ordering;
 
 use core_question_generator;
+use phpunit_util;
 use qtype_ordering;
 use qtype_ordering_test_helper;
 use qtype_ordering_edit_form;
@@ -70,17 +71,6 @@ final class questiontype_test extends \question_testcase {
             'generalfeedbackformat' => 1,
             'defaultmark' => 1,
         ];
-    }
-
-    /**
-     * Asserts that two XML strings are the same, ignoring differences in line endings.
-     *
-     * @param string $expectedxml
-     * @param string $xml
-     */
-    public function assert_same_xml(string $expectedxml, string $xml): void {
-        $this->assertEquals(str_replace("\r\n", "\n", $expectedxml),
-            str_replace("\r\n", "\n", $xml));
     }
 
     public function test_name(): void {
@@ -247,7 +237,7 @@ final class questiontype_test extends \question_testcase {
     public function test_xml_import(): void {
         $this->resetAfterTest();
         // Import a question from XML.
-        $xml = file_get_contents(__DIR__ . '/fixtures/testimport.moodle.xml');
+        $xml = file_get_contents(self::get_fixture_path(__NAMESPACE__, 'testimport.moodle.xml'));
         $xmldata = xmlize($xml);
         $format = new qformat_xml();
         $imported = $format->try_importing_using_qtypes(
@@ -259,7 +249,7 @@ final class questiontype_test extends \question_testcase {
     public function test_xml_import_long(): void {
         $this->resetAfterTest();
         // Import a question from XML.
-        $xml = file_get_contents(__DIR__ . '/fixtures/testimportlong.moodle.xml');
+        $xml = file_get_contents(self::get_fixture_path(__NAMESPACE__, 'testimportlong.moodle.xml'));
         $xmldata = xmlize($xml);
         $format = new qformat_xml();
         $imported = $format->try_importing_using_qtypes(
@@ -293,7 +283,7 @@ final class questiontype_test extends \question_testcase {
         $exporter = new qformat_xml();
         $xml = $exporter->writequestion($questiondata);
 
-        $expectedxml = file_get_contents(__DIR__ . '/fixtures/testexport.moodle.xml');
+        $expectedxml = file_get_contents(self::get_fixture_path(__NAMESPACE__, 'testexport.moodle.xml'));
 
         $this->assert_same_xml($expectedxml, $xml);
     }
@@ -301,9 +291,9 @@ final class questiontype_test extends \question_testcase {
     public function test_gift_import(): void {
         $this->resetAfterTest();
         // Import a question from GIFT.
-        $gift = file_get_contents(__DIR__ . '/fixtures/testimport.gift.txt');
+        $gift = file_get_contents(self::get_fixture_path(__NAMESPACE__, 'testimport.gift.txt'));
         $format = new qformat_gift();
-        $lines = preg_split('/[\\n\\r]/', str_replace("\r\n", "\n", $gift));
+        $lines = preg_split('/[\\n\\r]/', phpunit_util::normalise_line_endings($gift));
         $imported = $format->readquestion($lines);
 
         $this->assert(new question_check_specified_fields_expectation(self::expectedimport()), $imported);
@@ -324,8 +314,11 @@ final class questiontype_test extends \question_testcase {
         $exporter = new qformat_gift();
         $gift = $exporter->writequestion($questiondata);
 
-        $expectedgift = file_get_contents(__DIR__ . '/fixtures/testexport.gift.txt');
+        $expectedgift = file_get_contents(self::get_fixture_path(__NAMESPACE__, 'testexport.gift.txt'));
 
-        $this->assertEquals($expectedgift, $gift);
+        $this->assertEquals(
+            phpunit_util::normalise_line_endings($expectedgift),
+            phpunit_util::normalise_line_endings($gift)
+        );
     }
 }
